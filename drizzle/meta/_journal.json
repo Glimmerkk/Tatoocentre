@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1788510724863,
+      "tag": "0000_cooing_the_captain",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1788512114792,
+      "tag": "0001_classy_silver_samurai",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788514342747,
+      "tag": "0002_gorgeous_bloodstrike",
+      "breakpoints": true
+    }
+  ]
+}

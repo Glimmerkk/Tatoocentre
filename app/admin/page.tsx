@@ -1,0 +1,2 @@
+import {env} from "cloudflare:workers";import {requireChatGPTUser} from "../chatgpt-auth";import AdminDashboard from "./panel";export const dynamic="force-dynamic";
+export default async function Admin(){const user=await requireChatGPTUser("/admin");const owner=String(env.ADMIN_EMAIL||"").toLowerCase();if(!owner||user.email.toLowerCase()!==owner)return <main style={{padding:40}}>This admin inbox is restricted.</main>;return <AdminDashboard/>}

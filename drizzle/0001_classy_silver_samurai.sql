@@ -1,0 +1,1 @@
+ALTER TABLE `chat_messages` ADD `telegram_message_id` integer;
