@@ -1,0 +1,1 @@
+ALTER TABLE `bookings` ADD `address` text DEFAULT 'Not provided' NOT NULL;
