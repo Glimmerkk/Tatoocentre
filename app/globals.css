@@ -5,3 +5,18 @@
 /* Premium hero artwork treatment */
 .portrait{border:1px solid #3b1715;box-shadow:0 28px 70px #0009}
 .portrait img{object-position:72% center;filter:contrast(1.05) saturate(.9)}
+
+/* Balanced charcoal palette with restrained red accents */
+:root{--red:#d73a32}
+.topbar{background:#151515;color:#d9d3cc;border-bottom:1px solid #49201e}
+.booking{background:radial-gradient(circle at 85% 15%,#351311 0,transparent 32%),#111;color:var(--paper)}
+.booking .sectionHead p{color:#aaa39c}
+.form input,.form select,.form textarea{border:1px solid #514846;background:#191919;color:var(--paper);border-radius:4px}
+.form input::placeholder,.form textarea::placeholder{color:#837c76}
+.form input:focus,.form select:focus,.form textarea:focus{outline:2px solid var(--red);outline-offset:1px;border-color:transparent}
+.submit{background:var(--red);color:#fff;border-radius:4px}
+.chatHead{background:#211817;color:var(--paper);border-bottom:1px solid #60302c}
+.chatHead button{color:var(--paper)}
+.chatBody .customer{background:#8f2e29;color:#fff}
+body .priceAmount span,body .reviewTrack span,body .realReviews span{color:var(--red)}
+body .reviewForm button{background:var(--red);color:#fff}
