@@ -20,3 +20,15 @@
 .chatBody .customer{background:#8f2e29;color:#fff}
 body .priceAmount span,body .reviewTrack span,body .realReviews span{color:var(--red)}
 body .reviewForm button{background:var(--red);color:#fff}
+
+/* Warm and welcoming booking palette */
+:root{--red:#ad4f46}
+.booking{background:linear-gradient(145deg,#f8f1e8 0%,#eadfd3 100%);color:#2d231f}
+.booking .sectionHead p{color:#695a53}
+.booking .form label{color:#2d231f}
+.booking .form input,.booking .form select,.booking .form textarea{background:#fffaf5;color:#2d231f;border:1px solid #c9b8aa;box-shadow:0 6px 20px #4b2b1d0d}
+.booking .form input::placeholder,.booking .form textarea::placeholder{color:#8c7a70}
+.booking .form input:focus,.booking .form select:focus,.booking .form textarea:focus{outline:2px solid var(--red);outline-offset:1px;border-color:transparent}
+.booking .submit{background:var(--red);color:#fff;box-shadow:0 8px 22px #71302830}
+.booking .notice{color:#5c4c45}
+.chatButton{background:var(--red);color:#fff}
