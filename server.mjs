@@ -24,10 +24,10 @@ async function sendTelegram(text,requestOrigin){
   if(!token||!chatId)throw new Error("Telegram is not configured");
   if(site){
     const webhook={url:`${site.replace(/\/$/,"")}/api/telegram/webhook`,allowed_updates:["message"]};
-    if(secret)webhook.secret_token=secret;
+    if(secret&&/^[A-Za-z0-9_-]{1,256}$/.test(secret))webhook.secret_token=secret;
     const hookResponse=await fetch(`https://api.telegram.org/bot${token}/setWebhook`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(webhook)});
     const hookResult=await hookResponse.json();
-    if(!hookResult.ok)throw new Error(`Telegram webhook failed: ${hookResult.description||"unknown error"}`);
+    if(!hookResult.ok)console.error("Telegram webhook setup failed",hookResult.description||"unknown error");
   }
   const response=await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:chatId,text,disable_web_page_preview:true,reply_markup:{force_reply:true,input_field_placeholder:"Reply to this customer"}})});
   const data=await response.json();
@@ -73,7 +73,8 @@ async function api(req,res,url){
   }catch{return json(res,500,{error:"Review unavailable"})}
 
   if(url.pathname==="/api/telegram/webhook"&&req.method==="POST"){
-    const expectedSecret=process.env.TELEGRAM_WEBHOOK_SECRET;
+    const configuredSecret=process.env.TELEGRAM_WEBHOOK_SECRET;
+    const expectedSecret=configuredSecret&&/^[A-Za-z0-9_-]{1,256}$/.test(configuredSecret)?configuredSecret:null;
     if(expectedSecret&&req.headers["x-telegram-bot-api-secret-token"]!==expectedSecret)return json(res,401,{ok:false});
     try{
       const update=await readBody(req),m=update.message;
@@ -87,7 +88,7 @@ async function api(req,res,url){
   return json(res,404,{error:"Not found"});
 }
 
-const mime={".html":"text/html; charset=utf-8",".js":"text/javascript; charset=utf-8",".css":"text/css; charset=utf-8",".jpg":"image/jpeg",".svg":"image/svg+xml",".png":"image/png",".ico":"image/x-icon"};
+const mime={".html":"text/html; charset=utf-8",".js":"text/javascript; charset=utf-8",".css":"text/css; charset=utf-8",".jpg":"image/png",".svg":"image/svg+xml",".png":"image/png",".ico":"image/x-icon"};
 createServer(async(req,res)=>{
   const url=new URL(req.url||"/",`http://${req.headers.host||"localhost"}`);
   if(url.pathname.startsWith("/api/"))return api(req,res,url);
