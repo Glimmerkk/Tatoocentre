@@ -16,24 +16,36 @@ CREATE TABLE IF NOT EXISTS reviews (id INTEGER PRIMARY KEY AUTOINCREMENT,name TE
 
 function json(res,status,data){res.writeHead(status,{"content-type":"application/json"});res.end(JSON.stringify(data))}
 async function readBody(req){const chunks=[];for await(const chunk of req)chunks.push(chunk);return JSON.parse(Buffer.concat(chunks).toString()||"{}")}
-async function sendTelegram(text,requestOrigin){
+async function sendTelegram(text){
   const token=process.env.TELEGRAM_BOT_TOKEN;
   const chatId=process.env.TELEGRAM_ADMIN_CHAT_ID;
-  const secret=process.env.TELEGRAM_WEBHOOK_SECRET;
-  const site=process.env.PUBLIC_SITE_URL||requestOrigin;
   if(!token||!chatId)throw new Error("Telegram is not configured");
-  if(site){
-    const webhook={url:`${site.replace(/\/$/,"")}/api/telegram/webhook`,allowed_updates:["message"]};
-    if(secret&&/^[A-Za-z0-9_-]{1,256}$/.test(secret))webhook.secret_token=secret;
-    const hookResponse=await fetch(`https://api.telegram.org/bot${token}/setWebhook`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(webhook)});
-    const hookResult=await hookResponse.json();
-    if(!hookResult.ok)console.error("Telegram webhook setup failed",hookResult.description||"unknown error");
-  }
   const response=await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:chatId,text,disable_web_page_preview:true,reply_markup:{force_reply:true,input_field_placeholder:"Reply to this customer"}})});
   const data=await response.json();
   if(!data.ok)throw new Error("Telegram delivery failed");
   return data.result.message_id;
 }
+
+let telegramOffset=0;
+let telegramPollingReady=false;
+async function saveTelegramReply(m){
+  if(!m?.text||String(m.chat?.id)!==String(process.env.TELEGRAM_ADMIN_CHAT_ID))return;
+  let origin=m.reply_to_message?db.prepare("SELECT * FROM chat_messages WHERE telegram_message_id=? LIMIT 1").get(m.reply_to_message.message_id):null;
+  if(!origin)origin=db.prepare("SELECT * FROM chat_messages WHERE sender='customer' ORDER BY id DESC LIMIT 1").get();
+  if(origin)db.prepare("INSERT INTO chat_messages(conversation_id,sender,body,telegram_message_id) VALUES(?,?,?,?)").run(origin.conversation_id,"agent",String(m.text).slice(0,1000),m.message_id);
+}
+async function pollTelegram(){
+  const token=process.env.TELEGRAM_BOT_TOKEN;
+  if(!token||!process.env.TELEGRAM_ADMIN_CHAT_ID){setTimeout(pollTelegram,5000);return}
+  try{
+    if(!telegramPollingReady){await fetch(`https://api.telegram.org/bot${token}/deleteWebhook`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({drop_pending_updates:true})});telegramPollingReady=true}
+    const response=await fetch(`https://api.telegram.org/bot${token}/getUpdates?offset=${telegramOffset}&timeout=20&allowed_updates=%5B%22message%22%5D`);
+    const data=await response.json();
+    if(data.ok)for(const update of data.result){telegramOffset=update.update_id+1;await saveTelegramReply(update.message)}
+  }catch(error){console.error("Telegram polling error",error)}
+  setTimeout(pollTelegram,1000);
+}
+pollTelegram();
 
 async function api(req,res,url){
   if(url.pathname==="/api/bookings"&&req.method==="POST")try{
@@ -45,7 +57,7 @@ async function api(req,res,url){
     const address=String(p.address).trim().slice(0,300);
     const customerText=`YOUR APPOINTMENT DETAILS\nName: ${p.name}\nPhone: ${p.phone}\nLocation and address: ${address}\nTattoo price: $${price}\nDeposit: $${deposit}\nPayment method: ${p.paymentMethod}\nPlacement and size: ${p.placement}\nPreferred date: ${p.date}\nPreferred time: ${p.time}\nTattoo idea: ${p.idea}\n\nDetails submitted. Please wait for a reply.`;
     const adminText=`📅 NEW TATTOO APPOINTMENT\n\nName: ${p.name}\nPhone: ${p.phone}\nLocation and address: ${address}\nPackage: ${p.packageName}\nFull price: $${price}\nDeposit: $${deposit}\nPayment: ${p.paymentMethod}\nPlacement: ${p.placement}\nDate: ${p.date} at ${p.time}\nIdea: ${p.idea}\n\nReply directly to this message to answer the customer.`;
-    const messageId=await sendTelegram(adminText,url.origin);
+    const messageId=await sendTelegram(adminText);
     const result=db.prepare("INSERT INTO bookings(name,phone,address,package_name,starting_price,deposit,payment_method,placement,date,time,idea) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(p.name,p.phone,address,p.packageName,price,deposit,p.paymentMethod,p.placement,p.date,p.time,p.idea);
     db.prepare("INSERT INTO chat_messages(conversation_id,sender,body,telegram_message_id) VALUES(?,?,?,?)").run(String(p.conversationId).slice(0,80),"customer",customerText,messageId);
     return json(res,201,{booking:{id:Number(result.lastInsertRowid)}});
@@ -59,7 +71,7 @@ async function api(req,res,url){
   if(url.pathname==="/api/chat"&&req.method==="POST")try{
     const p=await readBody(req),id=String(p.conversationId||"").trim().slice(0,80),text=String(p.body||"").trim().slice(0,1000);
     if(!id||!text)return json(res,400,{error:"Message required"});
-    const messageId=await sendTelegram(`💬 WEBSITE CHAT\nConversation: ${id}\n\n${text}\n\nReply directly to this message to answer the customer.`,url.origin);
+    const messageId=await sendTelegram(`💬 WEBSITE CHAT\nConversation: ${id}\n\n${text}\n\nReply directly to this message to answer the customer.`);
     const result=db.prepare("INSERT INTO chat_messages(conversation_id,sender,body,telegram_message_id) VALUES(?,?,?,?)").run(id,"customer",text,messageId);
     return json(res,201,{message:{id:Number(result.lastInsertRowid),sender:"customer",body:text}});
   }catch{return json(res,500,{error:"Chat unavailable"})}
@@ -79,9 +91,7 @@ async function api(req,res,url){
     try{
       const update=await readBody(req),m=update.message;
       if(!m?.text||String(m.chat.id)!==String(process.env.TELEGRAM_ADMIN_CHAT_ID))return json(res,200,{ok:true});
-      let origin=m.reply_to_message?db.prepare("SELECT * FROM chat_messages WHERE telegram_message_id=? LIMIT 1").get(m.reply_to_message.message_id):null;
-      if(!origin)origin=db.prepare("SELECT * FROM chat_messages WHERE sender='customer' ORDER BY id DESC LIMIT 1").get();
-      if(origin)db.prepare("INSERT INTO chat_messages(conversation_id,sender,body,telegram_message_id) VALUES(?,?,?,?)").run(origin.conversation_id,"agent",String(m.text).slice(0,1000),m.message_id);
+      await saveTelegramReply(m);
       return json(res,200,{ok:true});
     }catch{return json(res,200,{ok:true})}
   }
