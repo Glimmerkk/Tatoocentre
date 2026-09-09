@@ -16,13 +16,19 @@ CREATE TABLE IF NOT EXISTS reviews (id INTEGER PRIMARY KEY AUTOINCREMENT,name TE
 
 function json(res,status,data){res.writeHead(status,{"content-type":"application/json"});res.end(JSON.stringify(data))}
 async function readBody(req){const chunks=[];for await(const chunk of req)chunks.push(chunk);return JSON.parse(Buffer.concat(chunks).toString()||"{}")}
-async function sendTelegram(text){
+async function sendTelegram(text,requestOrigin){
   const token=process.env.TELEGRAM_BOT_TOKEN;
   const chatId=process.env.TELEGRAM_ADMIN_CHAT_ID;
   const secret=process.env.TELEGRAM_WEBHOOK_SECRET;
-  const site=process.env.PUBLIC_SITE_URL;
+  const site=process.env.PUBLIC_SITE_URL||requestOrigin;
   if(!token||!chatId)throw new Error("Telegram is not configured");
-  if(secret&&site)await fetch(`https://api.telegram.org/bot${token}/setWebhook`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url:`${site.replace(/\/$/,"")}/api/telegram/webhook`,secret_token:secret,allowed_updates:["message"]})});
+  if(site){
+    const webhook={url:`${site.replace(/\/$/,"")}/api/telegram/webhook`,allowed_updates:["message"]};
+    if(secret)webhook.secret_token=secret;
+    const hookResponse=await fetch(`https://api.telegram.org/bot${token}/setWebhook`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(webhook)});
+    const hookResult=await hookResponse.json();
+    if(!hookResult.ok)throw new Error(`Telegram webhook failed: ${hookResult.description||"unknown error"}`);
+  }
   const response=await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:chatId,text,disable_web_page_preview:true,reply_markup:{force_reply:true,input_field_placeholder:"Reply to this customer"}})});
   const data=await response.json();
   if(!data.ok)throw new Error("Telegram delivery failed");
@@ -39,7 +45,7 @@ async function api(req,res,url){
     const address=String(p.address).trim().slice(0,300);
     const customerText=`YOUR APPOINTMENT DETAILS\nName: ${p.name}\nPhone: ${p.phone}\nLocation and address: ${address}\nTattoo price: $${price}\nDeposit: $${deposit}\nPayment method: ${p.paymentMethod}\nPlacement and size: ${p.placement}\nPreferred date: ${p.date}\nPreferred time: ${p.time}\nTattoo idea: ${p.idea}\n\nDetails submitted. Please wait for a reply.`;
     const adminText=`📅 NEW TATTOO APPOINTMENT\n\nName: ${p.name}\nPhone: ${p.phone}\nLocation and address: ${address}\nPackage: ${p.packageName}\nFull price: $${price}\nDeposit: $${deposit}\nPayment: ${p.paymentMethod}\nPlacement: ${p.placement}\nDate: ${p.date} at ${p.time}\nIdea: ${p.idea}\n\nReply directly to this message to answer the customer.`;
-    const messageId=await sendTelegram(adminText);
+    const messageId=await sendTelegram(adminText,url.origin);
     const result=db.prepare("INSERT INTO bookings(name,phone,address,package_name,starting_price,deposit,payment_method,placement,date,time,idea) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(p.name,p.phone,address,p.packageName,price,deposit,p.paymentMethod,p.placement,p.date,p.time,p.idea);
     db.prepare("INSERT INTO chat_messages(conversation_id,sender,body,telegram_message_id) VALUES(?,?,?,?)").run(String(p.conversationId).slice(0,80),"customer",customerText,messageId);
     return json(res,201,{booking:{id:Number(result.lastInsertRowid)}});
@@ -53,7 +59,7 @@ async function api(req,res,url){
   if(url.pathname==="/api/chat"&&req.method==="POST")try{
     const p=await readBody(req),id=String(p.conversationId||"").trim().slice(0,80),text=String(p.body||"").trim().slice(0,1000);
     if(!id||!text)return json(res,400,{error:"Message required"});
-    const messageId=await sendTelegram(`💬 WEBSITE CHAT\nConversation: ${id}\n\n${text}\n\nReply directly to this message to answer the customer.`);
+    const messageId=await sendTelegram(`💬 WEBSITE CHAT\nConversation: ${id}\n\n${text}\n\nReply directly to this message to answer the customer.`,url.origin);
     const result=db.prepare("INSERT INTO chat_messages(conversation_id,sender,body,telegram_message_id) VALUES(?,?,?,?)").run(id,"customer",text,messageId);
     return json(res,201,{message:{id:Number(result.lastInsertRowid),sender:"customer",body:text}});
   }catch{return json(res,500,{error:"Chat unavailable"})}
@@ -67,7 +73,8 @@ async function api(req,res,url){
   }catch{return json(res,500,{error:"Review unavailable"})}
 
   if(url.pathname==="/api/telegram/webhook"&&req.method==="POST"){
-    if(req.headers["x-telegram-bot-api-secret-token"]!==process.env.TELEGRAM_WEBHOOK_SECRET)return json(res,401,{ok:false});
+    const expectedSecret=process.env.TELEGRAM_WEBHOOK_SECRET;
+    if(expectedSecret&&req.headers["x-telegram-bot-api-secret-token"]!==expectedSecret)return json(res,401,{ok:false});
     try{
       const update=await readBody(req),m=update.message;
       if(!m?.text||String(m.chat.id)!==String(process.env.TELEGRAM_ADMIN_CHAT_ID))return json(res,200,{ok:true});
